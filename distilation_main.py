@@ -64,7 +64,10 @@ if __name__ == '__main__':
     dataset = load_dataset('distillation_corpus')
 
     tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=256)
-    tokenized_dataset_256 = dataset.map(tokenize, batched=True, num_proc=16)
+    tokenized_dataset_256 = dataset.map(tokenize,
+                                        batched=True,
+                                        num_proc=16,
+                                        remove_columns=dataset['train'].column_names)
 
     data_collator = HerbertDataCollatorForWholeWordMask(tokenizer=tokenizer)
 
@@ -102,7 +105,10 @@ if __name__ == '__main__':
     trainer.train()
 
     tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=512)
-    tokenized_dataset_512 = dataset.map(tokenize, batched=True, num_proc=16)
+    tokenized_dataset_512 = dataset.map(tokenize,
+                                        batched=True,
+                                        num_proc=16,
+                                        remove_columns=dataset['train'].column_names)
 
     training_args.max_steps = 10000
 
