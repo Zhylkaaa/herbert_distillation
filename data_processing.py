@@ -37,7 +37,7 @@ if __name__ == '__main__':
         ar = Archive('tmp_data')
         dataset_path = os.path.join(args.datasets_path, f'{d}.jsonl.zst')
         for text, metadata in Reader(dataset_path).stream_data(get_meta=True):
-            keys = metadata.keys()
+            keys = list(metadata.keys())
             for k in keys:
                 if k not in allowed_fields:
                     del metadata[k]
