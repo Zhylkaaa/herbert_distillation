@@ -179,7 +179,7 @@ if __name__ == '__main__':
         remove_unused_columns=False,
     )
 
-    loss_fn = DistillationLoss(temperature=2.)
+    loss_fn = DistillationLoss(temperature=args.temperature)
 
     trainer = DistilTrainer(
         teacher_model=teacher_model,
