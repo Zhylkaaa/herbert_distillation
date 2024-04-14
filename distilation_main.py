@@ -1,17 +1,17 @@
-from typing import List
+import os
+from typing import List, Optional
 from argparse import ArgumentParser
 from functools import partial
 
 import torch
-import evaluate
 from transformers import (
     AutoModelForMaskedLM,
     AutoTokenizer,
     AutoConfig,
     TrainingArguments,
     Trainer,
-    EvalPrediction
 )
+from transformers.trainer import TRAINING_ARGS_NAME, unwrap_model, logger
 from datasets import load_dataset
 
 from monkey_patches import HerbertDataCollatorForWholeWordMask
@@ -97,46 +97,85 @@ class DistilTrainer(Trainer):
             perplexity_scalar = self._nested_gather(self.perplexity).mean().item()
             perplexity_scalar = perplexity_scalar / (self.state.global_step - self._globalstep_last_logged)
             self.log({'perplexity': perplexity_scalar})
+            self.perplexity -= self.perplexity
             self.control.should_log = True
 
         super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
 
+    def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        # If we are executing this function, we are the process zero, so we don't check for that.
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Saving model checkpoint to {output_dir}")
+
+        model = unwrap_model(self.model).student_model
+        state_dict = {k[len('student_model.'):]: v for k, v in state_dict.items() if k.startswith('student_model')} \
+            if state_dict else None
+
+        model.save_pretrained(
+            output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
+        )
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(output_dir)
+
+        # Good practice: save your training arguments together with the trained model
+        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+
 
 if __name__ == '__main__':
-    teacher_model = AutoModelForMaskedLM.from_pretrained('allegro/herbert-large-cased')
-    student_config = AutoConfig.from_pretrained('allegro/herbert-base-cased')
+    parser = ArgumentParser()
+    parser.add_argument('--teacher_model', default='allegro/herbert-large-cased')
+    parser.add_argument('--student_model', default='allegro/herbert-base-cased')
+    parser.add_argument('--dataset_name', default='distillation_corpus')
+    parser.add_argument('--num_proc', default=16)
+    parser.add_argument('--output_dir', default='distil_herbert_out')
+    parser.add_argument('--learning_rate', default=5e-5)
+    parser.add_argument('--warmup_ratio', default=0.06)
+    parser.add_argument('--num_train_epochs', default=3)
+    parser.add_argument('--per_device_train_batch_size', default=32)
+    parser.add_argument('--per_device_eval_batch_size', default=32)
+    parser.add_argument('--per_device_train_batch_size_finetune', default=32)
+    parser.add_argument('--per_device_eval_batch_size_finetune', default=32)
+    parser.add_argument('--gradient_accumulation_steps', default=1)
+    parser.add_argument('--eval_steps', default=0.5)
+    parser.add_argument('--save_steps', default=0.2)
+    parser.add_argument('--temperature', default=2.)
+    parser.add_argument('--fine_tuning_steps', default=10000)
+    args = parser.parse_args()
+    teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
+    student_config = AutoConfig.from_pretrained(args.student_model)
     student_config._name_or_path = 'Zhylkaaa/distil-herbert-cased'
     student_config.num_hidden_layers = student_config.num_hidden_layers // 2
 
     student_model = AutoModelForMaskedLM.from_config(student_config)
-    tokenizer = AutoTokenizer.from_pretrained('allegro/herbert-large-cased')
+    tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
 
-    dataset = load_dataset('distillation_corpus')
+    dataset = load_dataset(args.dataset_name)
 
     tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=256)
     tokenized_dataset_256 = dataset.map(tokenize,
                                         batched=True,
-                                        num_proc=16,
+                                        num_proc=args.num_proc,
                                         remove_columns=dataset['train'].column_names)
     tokenized_dataset_256.set_format('torch', columns=["input_ids", "token_type_ids", "attention_mask"])
 
     data_collator = HerbertDataCollatorForWholeWordMask(tokenizer=tokenizer)
 
     training_args = TrainingArguments(
-        output_dir='distil_bert_out',
+        output_dir=args.output_dir,
         report_to='wandb',
-        learning_rate=5e-5,
-        warmup_ratio=0.06,
-        num_train_epochs=3,
+        learning_rate=args.learning_rate,
+        warmup_ratio=args.warmup_ratio,
+        num_train_epochs=args.num_train_epochs,
         do_train=True,
         do_eval=True,
-        per_device_train_batch_size=32,
-        per_device_eval_batch_size=32,
-        gradient_accumulation_steps=1,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        per_device_eval_batch_size=args.per_device_eval_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         evaluation_strategy='steps',
-        eval_steps=0.5,
+        eval_steps=args.eval_steps,
         save_strategy='steps',
-        save_steps=0.2,
+        save_steps=args.save_steps,
         remove_unused_columns=False,
     )
 
@@ -157,10 +196,14 @@ if __name__ == '__main__':
     tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=512)
     tokenized_dataset_512 = dataset.map(tokenize,
                                         batched=True,
-                                        num_proc=16,
+                                        num_proc=args.num_proc,
                                         remove_columns=dataset['train'].column_names)
 
-    training_args.max_steps = 10000
+    training_args.max_steps = args.fine_tuning_steps
+    training_args.per_device_train_batch_size = args.per_device_train_batch_size_finetune
+    training_args.per_device_eval_batch_size = args.per_device_eval_batch_size_finetune
+
+    student_model = AutoModelForMaskedLM.from_pretrained(trainer.state.best_model_checkpoint)
 
     trainer = DistilTrainer(
         teacher_model=teacher_model,
