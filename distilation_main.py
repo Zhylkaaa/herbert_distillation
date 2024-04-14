@@ -165,7 +165,7 @@ if __name__ == '__main__':
         teacher_model=teacher_model,
         student_model=student_model,
         loss_fn=loss_fn,
-        training_args=training_args,
+        args=training_args,
         train_dataset=tokenized_dataset_512["train"],
         eval_dataset=tokenized_dataset_512["validation"],
         data_collator=data_collator,
