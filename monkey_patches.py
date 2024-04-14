@@ -1,15 +1,52 @@
 import warnings
 import random
-from typing import List
+from typing import List, Any, Mapping, Union, Dict
 
 from transformers import (
     DataCollatorForWholeWordMask,
     HerbertTokenizer,
-    HerbertTokenizerFast
+    HerbertTokenizerFast,
+)
+
+from transformers.data.data_collator import (
+    pad_without_fast_tokenizer_warning,
+    _torch_collate_batch,
+    tolist
 )
 
 
 class HerbertDataCollatorForWholeWordMask(DataCollatorForWholeWordMask):
+
+    def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+        if isinstance(examples[0], Mapping):
+            batch = pad_without_fast_tokenizer_warning(
+                self.tokenizer, examples, return_tensors="pt", pad_to_multiple_of=self.pad_to_multiple_of
+            )
+        else:
+            batch = {
+                "input_ids": _torch_collate_batch(examples, self.tokenizer, pad_to_multiple_of=self.pad_to_multiple_of)
+            }
+
+        mask_labels = []
+        for e in examples:
+            ref_tokens = []
+            for id in tolist(e["input_ids"]):
+                token = self.tokenizer._convert_id_to_token(id)
+                ref_tokens.append(token)
+
+            # For Chinese tokens, we need extra inf to mark sub-word, e.g [喜,欢]-> [喜，##欢]
+            if "chinese_ref" in e:
+                ref_pos = tolist(e["chinese_ref"])
+                len_seq = len(e["input_ids"])
+                for i in range(len_seq):
+                    if i in ref_pos:
+                        ref_tokens[i] = "##" + ref_tokens[i]
+            mask_labels.append(self._whole_word_mask(ref_tokens))
+        batch_mask = _torch_collate_batch(mask_labels, self.tokenizer, pad_to_multiple_of=self.pad_to_multiple_of)
+        inputs, labels = self.torch_mask_tokens(batch["input_ids"], batch_mask)
+        return {"input_ids": inputs, "labels": labels, **{k: v for k, v in batch.items()
+                                                          if k not in ["input_ids", "labels"]}}
+
     def _whole_word_mask(self, input_tokens: List[str], max_predictions=512):
         """
                 Get 0/1 labels for masked tokens with whole word mask proxy
