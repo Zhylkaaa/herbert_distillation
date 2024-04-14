@@ -97,6 +97,7 @@ class DistilTrainer(Trainer):
             perplexity_scalar = self._nested_gather(self.perplexity).mean().item()
             perplexity_scalar = perplexity_scalar / (self.state.global_step - self._globalstep_last_logged)
             self.log({'perplexity': perplexity_scalar})
+            self.control.should_log = True
 
         super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
 
