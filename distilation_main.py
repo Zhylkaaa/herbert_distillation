@@ -37,7 +37,10 @@ class DistilModel(torch.nn.Module):
 
     def forward(self, x):
         student_output = self.student_model(**x)
-        teacher_output = self.teacher_model(**x)
+        # absolutely unnecessary, but gives me peace of mind
+        with torch.no_grad():
+            teacher_output = self.teacher_model(**x)
+
         return student_output, teacher_output
 
     def train(self, mode: bool = True):
@@ -77,11 +80,6 @@ class DistilTrainer(Trainer):
         perp = torch.exp(mlm_loss).item()
         self.perplexity += perp
 
-        if self.control.should_log:
-            perplexity_scalar = self._nested_gather(self.perplexity).mean().item()
-            perplexity_scalar = perplexity_scalar / (self.state.global_step - self._globalstep_last_logged)
-            self.log({'perplexity': perplexity_scalar})
-
         return (loss, student_output) if return_outputs else loss
 
     def _inner_training_loop(
@@ -93,6 +91,14 @@ class DistilTrainer(Trainer):
                                      resume_from_checkpoint=resume_from_checkpoint,
                                      trial=trial,
                                      ignore_keys_for_eval=ignore_keys_for_eval)
+
+    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval):
+        if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
+            perplexity_scalar = self._nested_gather(self.perplexity).mean().item()
+            perplexity_scalar = perplexity_scalar / (self.state.global_step - self._globalstep_last_logged)
+            self.log({'perplexity': perplexity_scalar})
+
+        super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
 
 
 if __name__ == '__main__':
