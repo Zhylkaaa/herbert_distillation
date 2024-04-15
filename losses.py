@@ -24,12 +24,13 @@ class DistillationLoss(nn.Module):
         soft_teacher = F.softmax(teacher_logits / self.temperature, dim=-1)
         kl_loss = self.kl_lambda * self.temperature ** 2 * self.kl_div(soft_log_student, soft_teacher)
 
-        # should be loss between hidden states (which are not the same size, so just disable)
-        sim_loss = self.cosine_lambda * self.similarity_loss(student_logits,
-                                                             teacher_logits,
-                                                             torch.ones_like(targets))
+        # # should be loss between hidden states (which are not the same size, so just disable)
+        # sim_loss = self.cosine_lambda * self.similarity_loss(student_last_hidden,
+        #                                                      teacher_last_hidden,
+        #                                                      torch.ones_like(student_last_hidden))
 
-        output = mlm_loss + kl_loss + sim_loss
+        # output = mlm_loss + kl_loss + sim_loss
+        output = mlm_loss + kl_loss
         if return_parts:
-            output = (output, mlm_loss, kl_loss, sim_loss)
+            output = (output, mlm_loss, kl_loss)
         return output
