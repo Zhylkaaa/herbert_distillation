@@ -151,6 +151,9 @@ if __name__ == '__main__':
     parser.add_argument('--gradient_accumulation_steps', default=1, type=int)
     parser.add_argument('--eval_steps', default=0.5, type=float)
     parser.add_argument('--save_steps', default=0.2, type=float)
+    parser.add_argument('--target_lambda', default=0.5, type=float)
+    parser.add_argument('--kl_lambda', default=0.5, type=float)
+    parser.add_argument('--cosine_lambda', default=0., type=float)
     parser.add_argument('--temperature', default=2., type=float)
     args = parser.parse_args()
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
@@ -188,10 +191,14 @@ if __name__ == '__main__':
         save_strategy='steps',
         save_steps=args.save_steps,
         remove_unused_columns=False,
-        dataloader_num_workers=args.dataloader_num_workers
+        dataloader_num_workers=args.dataloader_num_workers,
+        fp16=True
     )
 
-    loss_fn = DistillationLoss(temperature=args.temperature)
+    loss_fn = DistillationLoss(target_lambda=args.target_lambda,
+                               kl_lambda=args.kl_lambda,
+                               cosine_lambda=args.cosine_lambda,
+                               temperature=args.temperature)
 
     trainer = DistilTrainer(
         teacher_model=teacher_model,
