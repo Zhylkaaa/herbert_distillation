@@ -36,6 +36,9 @@ class DistilModel(torch.nn.Module):
         self.teacher_model.requires_grad_(False)
 
     def forward(self, x):
+        if 'return_loss' in x:
+            del x['return_loss']
+
         student_output = self.student_model(**x)
         # absolutely unnecessary, but gives me peace of mind
         with torch.no_grad():
@@ -81,6 +84,16 @@ class DistilTrainer(Trainer):
         self.perplexity += perp
 
         return (loss, student_output) if return_outputs else loss
+
+    def prediction_step(
+        self,
+        model,
+        inputs,
+        prediction_loss_only,
+        ignore_keys=None,
+    ):
+        inputs['return_loss'] = True
+        return super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
 
     def _inner_training_loop(
         self, batch_size=None, args=None, resume_from_checkpoint=None, trial=None, ignore_keys_for_eval=None
@@ -134,13 +147,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_train_epochs', default=3)
     parser.add_argument('--per_device_train_batch_size', default=32)
     parser.add_argument('--per_device_eval_batch_size', default=32)
-    parser.add_argument('--per_device_train_batch_size_finetune', default=32)
-    parser.add_argument('--per_device_eval_batch_size_finetune', default=32)
     parser.add_argument('--gradient_accumulation_steps', default=1)
     parser.add_argument('--eval_steps', default=0.5)
     parser.add_argument('--save_steps', default=0.2)
     parser.add_argument('--temperature', default=2.)
-    parser.add_argument('--fine_tuning_steps', default=10000)
     args = parser.parse_args()
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
     student_config = AutoConfig.from_pretrained(args.student_model)
@@ -192,28 +202,3 @@ if __name__ == '__main__':
         #compute_metrics=compute_metrics,
     )
     trainer.train()
-
-    tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=512)
-    tokenized_dataset_512 = dataset.map(tokenize,
-                                        batched=True,
-                                        num_proc=args.num_proc,
-                                        remove_columns=dataset['train'].column_names)
-
-    training_args.max_steps = args.fine_tuning_steps
-    training_args.per_device_train_batch_size = args.per_device_train_batch_size_finetune
-    training_args.per_device_eval_batch_size = args.per_device_eval_batch_size_finetune
-
-    student_model = AutoModelForMaskedLM.from_pretrained(trainer.state.best_model_checkpoint)
-
-    trainer = DistilTrainer(
-        teacher_model=teacher_model,
-        student_model=student_model,
-        loss_fn=loss_fn,
-        args=training_args,
-        train_dataset=tokenized_dataset_512["train"],
-        eval_dataset=tokenized_dataset_512["validation"],
-        data_collator=data_collator,
-        #compute_metrics=compute_metrics,
-    )
-    trainer.train()
-
