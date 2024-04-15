@@ -27,15 +27,6 @@ export ip_head
 
 export WANDB_PROJECT=distil-herbert
 
-srun --nodes=1 --ntasks=1 -w "$head_node" --export=ALL,WANDB_PROJECT="$WANDB_PROJECT" \
-    accelerate launch --main_process_ip="$head_node_ip" \
-                          --main_process_port="$port" \
-                          --num_processes=4 \
-                          --num_machines=2 \
-                          --multi_gpu \
-                          --mixed_precision=fp16 \
-                          distilation_main.py &
-
 # number of nodes other than the head node
 worker_num=$((SLURM_JOB_NUM_NODES - 1))
 
@@ -45,10 +36,25 @@ for ((i = 1; i <= worker_num; i++)); do
     srun --nodes=1 --ntasks=1 -w "$node_i" --export=ALL,WANDB_PROJECT="$WANDB_PROJECT" \
         accelerate launch --main_process_ip="$head_node_ip" \
                           --main_process_port="$port" \
-                          --num_processes=4 \
+                          --machine_rank="$i" \
+                          --num_processes=8 \
                           --num_machines=2 \
                           --multi_gpu \
                           --mixed_precision=fp16 \
-                          distilation_main.py &
+                          distilation_main.py \
+                          --per_device_train_batch_size 64 \
+                          --per_device_eval_batch_size 64 &
 done
+
+srun --nodes=1 --ntasks=1 -w "$head_node" --export=ALL,WANDB_PROJECT="$WANDB_PROJECT" \
+    accelerate launch --main_process_ip="$head_node_ip" \
+                          --main_process_port="$port" \
+                          --machine_rank="0" \
+                          --num_processes=8 \
+                          --num_machines=2 \
+                          --multi_gpu \
+                          --mixed_precision=fp16 \
+                          distilation_main.py \
+                          --per_device_train_batch_size 64 \
+                          --per_device_eval_batch_size 64
 

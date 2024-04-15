@@ -21,17 +21,18 @@ if __name__ == '__main__':
     parser.add_argument('--student_model', required=True)
     parser.add_argument('--teacher_model', default='allegro/herbert-large-cased')
     parser.add_argument('--dataset_name', default='distillation_corpus')
-    parser.add_argument('--num_proc', default=16)
-    parser.add_argument('--output_dir', default='distil_herbert_out_512')
-    parser.add_argument('--learning_rate', default=5e-5)
-    parser.add_argument('--warmup_ratio', default=0.06)
-    parser.add_argument('--fine_tuning_steps', default=10000)
-    parser.add_argument('--per_device_train_batch_size', default=32)
-    parser.add_argument('--per_device_eval_batch_size', default=32)
-    parser.add_argument('--gradient_accumulation_steps', default=1)
-    parser.add_argument('--eval_steps', default=0.5)
-    parser.add_argument('--save_steps', default=0.2)
-    parser.add_argument('--temperature', default=2.)
+    parser.add_argument('--num_proc', default=16, type=int)
+    parser.add_argument('--output_dir', default='distil_herbert_out')
+    parser.add_argument('--learning_rate', default=5e-5, type=float)
+    parser.add_argument('--warmup_ratio', default=0.06, type=float)
+    parser.add_argument('--num_train_epochs', default=3, type=int)
+    parser.add_argument('--per_device_train_batch_size', default=32, type=int)
+    parser.add_argument('--per_device_eval_batch_size', default=32, type=int)
+    parser.add_argument('--dataloader_num_workers', default=10, type=int)
+    parser.add_argument('--gradient_accumulation_steps', default=1, type=int)
+    parser.add_argument('--eval_steps', default=0.5, type=float)
+    parser.add_argument('--save_steps', default=0.2, type=float)
+    parser.add_argument('--temperature', default=2., type=float)
     args = parser.parse_args()
 
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
@@ -71,6 +72,7 @@ if __name__ == '__main__':
         save_strategy='steps',
         save_steps=args.save_steps,
         remove_unused_columns=False,
+        dataloader_num_workers=args.dataloader_num_workers
     )
 
     loss_fn = DistillationLoss(temperature=args.temperature)
