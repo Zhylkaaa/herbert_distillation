@@ -39,17 +39,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
-    student_model = AutoModelForMaskedLM.from_config(args.student_model)
+    student_model = AutoModelForMaskedLM.from_pretrained(args.student_model)
     tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
 
     dataset = load_dataset(args.dataset_name)
-
-    tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=256)
-    tokenized_dataset_256 = dataset.map(tokenize,
-                                        batched=True,
-                                        num_proc=args.num_proc,
-                                        remove_columns=dataset['train'].column_names)
-    tokenized_dataset_256.set_format('torch', columns=["input_ids", "token_type_ids", "attention_mask"])
 
     data_collator = HerbertDataCollatorForWholeWordMask(tokenizer=tokenizer)
     tokenize = partial(tokenize_and_split, tokenizer=tokenizer, max_length=512)
