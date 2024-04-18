@@ -34,7 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_steps', default=0.2, type=float)
     parser.add_argument('--target_lambda', default=0.5, type=float)
     parser.add_argument('--kl_lambda', default=0.5, type=float)
-    parser.add_argument('--cosine_lambda', default=0., type=float)
+    parser.add_argument('--similarity_lambda', default=0., type=float)
     parser.add_argument('--temperature', default=2., type=float)
     args = parser.parse_args()
 
@@ -81,7 +81,7 @@ if __name__ == '__main__':
 
     loss_fn = DistillationLoss(target_lambda=args.target_lambda,
                                kl_lambda=args.kl_lambda,
-                               cosine_lambda=args.cosine_lambda,
+                               similarity_lambda=args.similarity_lambda,
                                temperature=args.temperature)
 
     trainer = DistilTrainer(
