@@ -28,12 +28,15 @@ def tokenize_and_split(examples, tokenizer, max_length=256):
 
 
 class DistilModel(torch.nn.Module):
+    _keys_to_ignore_on_save = set()
+
     def __init__(self, student_model: torch.nn.Module, teacher_model: torch.nn.Module, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.student_model = student_model
         self.teacher_model = teacher_model
         self.teacher_model.eval()
         self.teacher_model.requires_grad_(False)
+        DistilModel._keys_to_ignore_on_save = set(['teacher_model.'+k for k in self.teacher_model.state_dict()])
 
     def forward(self, x):
         if 'return_loss' in x:
@@ -80,8 +83,9 @@ class DistilTrainer(Trainer):
 
         loss, mlm_loss, *_ = self.loss_fn(masked_student_logits, masked_teacher_logits, masked_labels, return_parts=True)
 
-        perp = torch.exp(mlm_loss).item()
-        self.perplexity += perp
+        if self.model.training:
+            perp = torch.exp(mlm_loss).item()
+            self.perplexity += perp
 
         return (loss, student_output) if return_outputs else loss
 
@@ -155,6 +159,7 @@ if __name__ == '__main__':
     parser.add_argument('--kl_lambda', default=0.5, type=float)
     parser.add_argument('--cosine_lambda', default=0., type=float)
     parser.add_argument('--temperature', default=2., type=float)
+    parser.add_argument('--resume_from_checkpoint', default=None, type=str)
     args = parser.parse_args()
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
     student_config = AutoConfig.from_pretrained(args.student_model)
@@ -210,4 +215,4 @@ if __name__ == '__main__':
         data_collator=data_collator,
         #compute_metrics=compute_metrics,
     )
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

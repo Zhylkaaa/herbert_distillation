@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', default='distil_herbert_out')
     parser.add_argument('--learning_rate', default=5e-5, type=float)
     parser.add_argument('--warmup_ratio', default=0.06, type=float)
-    parser.add_argument('--num_train_epochs', default=3, type=int)
+    parser.add_argument('--fine_tuning_steps', default=10000, type=int)
     parser.add_argument('--per_device_train_batch_size', default=32, type=int)
     parser.add_argument('--per_device_eval_batch_size', default=32, type=int)
     parser.add_argument('--dataloader_num_workers', default=10, type=int)
