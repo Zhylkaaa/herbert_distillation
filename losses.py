@@ -42,11 +42,13 @@ class DistillationLoss(nn.Module):
                 return_parts=False):
         if not self.training:
             return self.mlm_loss(student_logits, targets)
-        mlm_loss = self.target_lambda * self.mlm_loss(student_logits, targets)
+        mlm_loss = self.mlm_loss(student_logits, targets)
 
         soft_log_student = F.log_softmax(student_logits / self.temperature, dim=-1)
         soft_teacher = F.softmax(teacher_logits / self.temperature, dim=-1)
-        kl_loss = self.kl_lambda * self.temperature ** 2 * self.kl_div(soft_log_student, soft_teacher)
+        kl_loss = self.kl_div(soft_log_student, soft_teacher)
+
+        output = self.target_lambda * mlm_loss + self.kl_lambda * self.temperature ** 2 * kl_loss
 
         sim_loss = None
         if not (self.similarity_lambda < 1e-8 or self.similarity_loss is None):
@@ -58,11 +60,10 @@ class DistillationLoss(nn.Module):
             elif self.similarity_measure == 'linear':
                 sim_loss = self.similarity_loss(student_hidden.unsqueeze(1),
                                                 teacher_hidden.unsqueeze(1))
-            sim_loss = self.similarity_lambda * sim_loss
+            sim_loss = sim_loss
 
-        output = mlm_loss + kl_loss
         if sim_loss is not None:
-            output += sim_loss
+            output += self.similarity_lambda * sim_loss
         if return_parts:
             output = (output, mlm_loss, kl_loss) + ((sim_loss,) if sim_loss else ())
         return output
