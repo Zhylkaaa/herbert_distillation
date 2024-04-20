@@ -92,13 +92,11 @@ class EnergyMetric(torch.nn.Module):
     @torch.no_grad()
     def fit(self, X: torch.Tensor, Y:torch.Tensor):
 
-        r_x=X.shape[2]
-        r_y=Y.shape[2]
-
-        prods_idx=np.array(list(itertools.product(range(r_x), range(r_y))))
-
-        X=torch.flatten(X[:, :, prods_idx[:,0],:], start_dim=1, end_dim=2)
-        Y=torch.flatten(Y[:, :, prods_idx[:,1],:], start_dim=1, end_dim=2)
+        n_x=X.shape[2]
+        n_y=Y.shape[2]
+        
+        X=X.repeat_interleave(n_y, dim=2).flatten(start_dim=1, end_dim=2)
+        Y=Y.tile(dims=(1, 1, n_x, 1)).flatten(start_dim=1, end_dim=2)
 
         if X.shape[1] != Y.shape[1]:
             raise ValueError(f"After permutation got {X.shape} and {Y.shape}")
@@ -112,7 +110,7 @@ class EnergyMetric(torch.nn.Module):
             batch_loss.append(torch.mean(iter_result, dim=-1))
             w=1/torch.maximum(torch.sqrt(iter_result), self.tol)
 
-        return w, T, batch_loss
+        return w, T, batch_loss, X, Y
         
     def get_orth_matrix(self, X:torch.Tensor , Y:torch.Tensor):
         U, _, Vt= torch.linalg.svd(torch.bmm(X.transpose(1,2), Y))
@@ -120,7 +118,7 @@ class EnergyMetric(torch.nn.Module):
 
     def get_dist_energy(self,X:torch.Tensor): 
         n=X.shape[2]
-        combs = np.array(list(itertools.combinations(range(n), 2)))
+        combs = torch.combinations(torch.arange(n))
         X1= torch.flatten(X[:, :, combs[:, 0], :], start_dim=1, end_dim=2)
         X2=torch.flatten(X[:, :, combs[:, 1], :], start_dim=1, end_dim=2)
         
@@ -151,19 +149,11 @@ class EnergyMetric(torch.nn.Module):
                 raise ValueError(f'Unrecognized dimension matching {self.reduction}')
                 
         #return self.fit(X,Y)
-        w,T,fit_loss= self.fit(X,Y)
+        w,T,fit_loss, X_prod, Y_prod= self.fit(X,Y)
         
         e_xx=self.get_dist_energy(X)
         e_yy=self.get_dist_energy(Y)
-
-        n_x=X.shape[2]
-        n_y=Y.shape[2]
-        
-        prod = np.array(list(itertools.product(range(n_x), range(n_y))))
-        X_prod=torch.flatten(X[:, :, prod[:,0],:], start_dim=1, end_dim=2)
-        Y_prod=torch.flatten(Y[:, :,  prod[:,1], :], start_dim=1, end_dim=2)
         Y_proj=torch.bmm(Y_prod, T)
-        e_xy=torch.mean(torch.linalg.norm(X_prod-Y_prod, dim=-1),dim=-1)
+        e_xy=torch.mean(torch.linalg.norm(X_prod-Y_proj, dim=-1),dim=-1)
 
         return torch.sqrt(torch.nn.functional.relu(e_xy-0.5*(e_xx+e_yy))).mean()
-                                           
