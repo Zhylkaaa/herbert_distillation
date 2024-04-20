@@ -7,7 +7,7 @@ from typing import Literal, Tuple, Optional, List
 
 class LinearMeasure(torch.nn.Module):
     def __init__(self,
-                 alpha=1, center_columns=True, dim_matching='zero_pad', svd_grad=True, reduction='mean'):
+                 alpha=1, center_columns=True, dim_matching='zero_pad', svd_grad=True, reduction='mean', no_svd=True):
         super(LinearMeasure, self).__init__()
         self.register_buffer('alpha', torch.tensor(alpha))
         assert dim_matching in [None, 'none', 'zero_pad', 'pca']
@@ -15,7 +15,9 @@ class LinearMeasure(torch.nn.Module):
         self.center_columns = center_columns
         self.svd_grad = svd_grad
         self.reduction = reduction
+        self.no_svd=no_svd        
 
+    
     def partial_fit(self, X: Tensor) -> Tuple[Tensor, Tensor]:
         """Computes the mean centered columns. Can be replaced later by whitening transform for linear invarariances."""
         if self.center_columns:
@@ -23,11 +25,12 @@ class LinearMeasure(torch.nn.Module):
         else:
             mx = torch.zeros(X.shape[2], dtype=X.dtype, device=X.device)
         wx = X - mx
+        
         return mx, wx
 
     def fit(self, X: Tensor, Y: Tensor) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]:
         mx, wx = self.partial_fit(X)
-        my, wy = self.partial_fit(Y)
+        my, wy = self.partial_fit(Y)            
 
         if self.svd_grad:
             wxy = torch.bmm(wx.transpose(1, 2), wy)
@@ -65,9 +68,19 @@ class LinearMeasure(torch.nn.Module):
                 raise NotImplementedError
             else:
                 raise ValueError(f'Unrecognized dimension matching {self.reduction}')
+        
+        if self.no_svd and X.shape[1]==1:
+            mx, wx = self.partial_fit(X)
+            my, wy = self.partial_fit(Y)
 
-        X_params, Y_params = self.fit(X, Y)
-        norms = torch.linalg.norm(self.project(X, *X_params) - self.project(Y, *Y_params), ord="fro", dim=(1, 2))
+            x_norm=torch.linalg.norm(wx, dim=(1,2))
+            y_norm=torch.linalg.norm(wy, dim=(1,2))
+
+            norms= torch.sqrt( x_norm**2 + y_norm **2 - 2*(x_norm *y_norm))
+
+        else:
+            X_params, Y_params = self.fit(X, Y)
+            norms = torch.linalg.norm(self.project(X, *X_params) - self.project(Y, *Y_params), ord="fro", dim=(1, 2))
 
         if self.reduction == 'mean':
             return norms.mean()
@@ -114,7 +127,7 @@ class EnergyMetric(torch.nn.Module):
         
     def get_orth_matrix(self, X:torch.Tensor , Y:torch.Tensor):
         U, _, Vt= torch.linalg.svd(torch.bmm(X.transpose(1,2), Y))
-        return torch.bmm(U,Vt)
+        return torch.bmm(Vt.transpose(1,2) , U.transpose(1,2))
 
     def get_dist_energy(self,X:torch.Tensor): 
         n=X.shape[2]
@@ -156,4 +169,13 @@ class EnergyMetric(torch.nn.Module):
         Y_proj=torch.bmm(Y_prod, T)
         e_xy=torch.mean(torch.linalg.norm(X_prod-Y_proj, dim=-1),dim=-1)
 
-        return torch.sqrt(torch.nn.functional.relu(e_xy-0.5*(e_xx+e_yy))).mean()
+        norms= torch.sqrt(torch.nn.functional.relu(e_xy-0.5*(e_xx+e_yy)))
+
+        if self.reduction == 'mean':
+            return norms.mean()
+        elif self.reduction == 'sum':
+            return norms.sum()
+        elif self.reduction == 'none' or self.reduction is None:
+            return norms
+        else:
+            raise ValueError(f'Unrecognized reduction {self.reduction}')
