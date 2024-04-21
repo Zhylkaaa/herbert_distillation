@@ -16,6 +16,7 @@ from datasets import load_dataset
 
 from monkey_patches import HerbertDataCollatorForWholeWordMask
 from losses import DistillationLoss
+from model_utils import get_student_model
 
 
 def tokenize_and_split(examples, tokenizer, max_length=256):
@@ -176,11 +177,8 @@ if __name__ == '__main__':
     parser.add_argument('--resume_from_checkpoint', default=None, type=str)
     args = parser.parse_args()
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
-    student_config = AutoConfig.from_pretrained(args.student_model)
-    student_config._name_or_path = 'Zhylkaaa/distil-herbert-cased'
-    student_config.num_hidden_layers = student_config.num_hidden_layers // 2
+    student_model = get_student_model(args.student_model)
 
-    student_model = AutoModelForMaskedLM.from_config(student_config)
     tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
 
     dataset = load_dataset(args.dataset_name)
