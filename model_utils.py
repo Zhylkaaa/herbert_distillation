@@ -10,6 +10,7 @@ from transformers import (
 from transformers.models.bert.modeling_bert import BertEncoder
 
 
+# credit: https://github.com/BartekKrzepkowski/DistilHerBERT-base_vol2/blob/master/models/distil_student.py
 def copy_weights_to_student(init_model, student):
     if isinstance(init_model, BertModel) or isinstance(init_model, BertForMaskedLM):
         for teacher_part, student_part in zip(init_model.children(), student.children()):
