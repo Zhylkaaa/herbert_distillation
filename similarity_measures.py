@@ -75,7 +75,7 @@ class LinearMeasure(torch.nn.Module):
             x_norm = torch.linalg.norm(wx, dim=(1, 2))
             y_norm = torch.linalg.norm(wy, dim=(1, 2))
 
-            norms = torch.sqrt(x_norm ** 2 + y_norm ** 2 - 2 * (x_norm * y_norm))
+            norms = (x_norm + y_norm) ** 2
 
         else:
             X_params, Y_params = self.fit(X, Y)
