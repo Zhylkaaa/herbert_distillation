@@ -7,6 +7,8 @@ from datasets import Dataset, DatasetDict
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, DataCollatorWithPadding
 
+from sklearn.model_selection import train_test_split
+
 
 def tokenize_and_split(examples, tokenizer, max_length=256):
     return tokenizer(
@@ -36,10 +38,10 @@ class KlejDatamodule(L.LightningDataModule):
 
         if os.path.exists(os.path.join(data_path, 'dev.tsv')):
             path = 'dev.tsv'
+            val_dataset = pd.read_csv(os.path.join(data_path, path), sep='\t', quoting=3, skip_blank_lines=False)
+            val_dataset['label'] = val_dataset.target.astype(label_dtype)
         else:
-            path = 'train.tsv'
-        val_dataset = pd.read_csv(os.path.join(data_path, path), sep='\t', quoting=3, skip_blank_lines=False)
-        val_dataset['label'] = val_dataset.target.astype(label_dtype)
+            train_dataset, val_dataset = train_test_split(train_dataset, train_size=0.8, random_state=0, shuffle=True)
 
         self.label_names = label_dtype.categories
 
