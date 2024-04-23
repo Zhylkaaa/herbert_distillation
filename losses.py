@@ -13,7 +13,8 @@ class DistillationLoss(nn.Module):
             similarity_lambda=0.3,
             temperature=2.,
             similarity_measure=None,
-            **similarity_measure_kwargs
+            full_similarity=False,
+            **similarity_measure_kwargs,
     ):
         super().__init__()
         self.register_buffer('target_lambda', torch.tensor(target_lambda))
@@ -24,14 +25,17 @@ class DistillationLoss(nn.Module):
         self.mlm_loss = nn.CrossEntropyLoss()
         self.kl_div = nn.KLDivLoss(reduction='batchmean')
         self.similarity_measure = similarity_measure
+        self.full_similarity = None
         if similarity_measure == 'cosine':
             self.similarity_loss = nn.CosineEmbeddingLoss()
         elif similarity_measure == 'linear':
             self.similarity_loss = LinearMeasure(**similarity_measure_kwargs)
+            self.full_similarity = full_similarity
         elif similarity_measure is None or similarity_measure == 'none':
             self.similarity_loss = None
         else:
             raise ValueError(f'Unrecognized similarity measure {similarity_measure}')
+
 
     def forward(self,
                 student_logits,
@@ -58,8 +62,16 @@ class DistillationLoss(nn.Module):
                                                 torch.ones(student_hidden.shape[:-1],
                                                            device=student_hidden.device).long())
             elif self.similarity_measure == 'linear':
-                sim_loss = self.similarity_loss(student_hidden.unsqueeze(1),
-                                                teacher_hidden.unsqueeze(1))
+                if self.full_similarity:
+                    assert teacher_hidden.shape[1] % student_hidden.shape[1] == 0
+                    subsampling_ratio = teacher_hidden.shape[1] // student_hidden.shape[1]
+                    student_hidden = student_hidden.view(-1, student_hidden.shape[-1])
+                    teacher_hidden = teacher_hidden[:, ::subsampling_ratio].view(-1, teacher_hidden.shape[-1])
+                    sim_loss = self.similarity_loss(student_hidden.unsqueeze(1),
+                                                    teacher_hidden.unsqueeze(1))
+                else:
+                    sim_loss = self.similarity_loss(student_hidden[:, -1].unsqueeze(1),
+                                                    teacher_hidden[:, -1].unsqueeze(1))
             sim_loss = sim_loss
 
         if sim_loss is not None:

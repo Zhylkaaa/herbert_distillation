@@ -80,10 +80,18 @@ class DistilTrainer(Trainer):
         mask = inputs['labels'] != -100
 
         masked_student_logits = student_output.logits[mask]  # B x vocab
-        masked_student_states = student_output.hidden_states[-1][mask]  # B x student_H
+
+        B, L, h = student_output.hidden_states[-1].shape
+        n_layers = len(student_output.hidden_states) - 1
+        masked_student_states = torch.stack(student_output.hidden_states[1:]).view(B * L, n_layers, h)
+        masked_student_states = masked_student_states[mask.view(-1)]
 
         masked_teacher_logits = teacher_output.logits[mask]  # B x vocab
-        masked_teacher_states = teacher_output.hidden_states[-1][mask]  # B x teacher_H
+
+        B, L, h = teacher_output.hidden_states[-1].shape
+        n_layers = len(teacher_output.hidden_states) - 1
+        masked_teacher_states = torch.stack(teacher_output.hidden_states[1:]).view(B * L, n_layers, h)
+        masked_teacher_states = masked_teacher_states[mask.view(-1)]
 
         masked_labels = inputs['labels'][mask]
 
@@ -171,6 +179,7 @@ if __name__ == '__main__':
     parser.add_argument('--similarity_lambda', default=0., type=float)
     parser.add_argument('--similarity_measure', default=None, choices=['none', 'cosine', 'linear'])
     parser.add_argument('--no_center_columns', action='store_true')
+    parser.add_argument('--full_similarity', action='store_true')
     parser.add_argument('--no_svd_grad', action='store_true')
     parser.add_argument('--dim_matching', default='zero_pad', choices=['zero_pad', 'none'])
     parser.add_argument('--temperature', default=2., type=float)
@@ -217,6 +226,7 @@ if __name__ == '__main__':
                                similarity_lambda=args.similarity_lambda,
                                temperature=args.temperature,
                                similarity_measure=args.similarity_measure,
+                               full_similarity=args.full_similarity,
                                center_columns=not args.no_center_columns,
                                svd_grad=not args.no_svd_grad,
                                dim_matching=args.dim_matching)
