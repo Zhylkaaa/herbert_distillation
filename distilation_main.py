@@ -16,6 +16,7 @@ from datasets import load_dataset
 
 from monkey_patches import HerbertDataCollatorForWholeWordMask
 from losses import DistillationLoss
+from model_utils import get_student_model
 
 
 def tokenize_and_split(examples, tokenizer, max_length=256):
@@ -38,14 +39,14 @@ class DistilModel(torch.nn.Module):
         self.teacher_model.requires_grad_(False)
         DistilModel._keys_to_ignore_on_save = set(['teacher_model.'+k for k in self.teacher_model.state_dict()])
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if 'return_loss' in x:
             del x['return_loss']
 
-        student_output = self.student_model(**x)
+        student_output = self.student_model(**x, **kwargs)
         # absolutely unnecessary, but gives me peace of mind
         with torch.no_grad():
-            teacher_output = self.teacher_model(**x)
+            teacher_output = self.teacher_model(**x, **kwargs)
 
         return student_output, teacher_output
 
@@ -66,22 +67,40 @@ class DistilModel(torch.nn.Module):
 
 
 class DistilTrainer(Trainer):
-    def __init__(self, teacher_model=None, student_model=None, loss_fn=None, temperature=None, *args, **kwargs):
-        model = DistilModel(teacher_model, student_model)
+    def __init__(self, student_model=None, teacher_model=None, loss_fn=None, temperature=None, *args, **kwargs):
+        model = DistilModel(student_model, teacher_model)
         super().__init__(model=model, *args, **kwargs)
         self.temperature = temperature if temperature else 1.
         self.loss_fn = loss_fn
         self.perplexity = torch.tensor(0.)
 
     def compute_loss(self, model, inputs, return_outputs=False):
-        student_output, teacher_output = model(inputs)
+        student_output, teacher_output = model(inputs, output_hidden_states=True)
 
         mask = inputs['labels'] != -100
+
         masked_student_logits = student_output.logits[mask]  # B x vocab
+
+        B, L, h = student_output.hidden_states[-1].shape
+        n_layers = len(student_output.hidden_states) - 1
+        masked_student_states = torch.stack(student_output.hidden_states[1:]).view(B * L, n_layers, h)
+        masked_student_states = masked_student_states[mask.view(-1)]
+
         masked_teacher_logits = teacher_output.logits[mask]  # B x vocab
+
+        B, L, h = teacher_output.hidden_states[-1].shape
+        n_layers = len(teacher_output.hidden_states) - 1
+        masked_teacher_states = torch.stack(teacher_output.hidden_states[1:]).view(B * L, n_layers, h)
+        masked_teacher_states = masked_teacher_states[mask.view(-1)]
+
         masked_labels = inputs['labels'][mask]
 
-        loss, mlm_loss, *_ = self.loss_fn(masked_student_logits, masked_teacher_logits, masked_labels, return_parts=True)
+        loss, mlm_loss, *_ = self.loss_fn(masked_student_logits,
+                                          masked_teacher_logits,
+                                          masked_labels,
+                                          student_hidden=masked_student_states,
+                                          teacher_hidden=masked_teacher_states,
+                                          return_parts=True)
 
         if self.model.training:
             perp = torch.exp(mlm_loss).item()
@@ -157,16 +176,18 @@ if __name__ == '__main__':
     parser.add_argument('--save_steps', default=0.2, type=float)
     parser.add_argument('--target_lambda', default=0.5, type=float)
     parser.add_argument('--kl_lambda', default=0.5, type=float)
-    parser.add_argument('--cosine_lambda', default=0., type=float)
+    parser.add_argument('--similarity_lambda', default=0., type=float)
+    parser.add_argument('--similarity_measure', default=None, choices=['none', 'cosine', 'linear'])
+    parser.add_argument('--no_center_columns', action='store_true')
+    parser.add_argument('--full_similarity', action='store_true')
+    parser.add_argument('--no_svd_grad', action='store_true')
+    parser.add_argument('--dim_matching', default='zero_pad', choices=['zero_pad', 'none'])
     parser.add_argument('--temperature', default=2., type=float)
     parser.add_argument('--resume_from_checkpoint', default=None, type=str)
     args = parser.parse_args()
     teacher_model = AutoModelForMaskedLM.from_pretrained(args.teacher_model)
-    student_config = AutoConfig.from_pretrained(args.student_model)
-    student_config._name_or_path = 'Zhylkaaa/distil-herbert-cased'
-    student_config.num_hidden_layers = student_config.num_hidden_layers // 2
+    student_model = get_student_model(args.student_model)
 
-    student_model = AutoModelForMaskedLM.from_config(student_config)
     tokenizer = AutoTokenizer.from_pretrained(args.teacher_model)
 
     dataset = load_dataset(args.dataset_name)
@@ -202,12 +223,17 @@ if __name__ == '__main__':
 
     loss_fn = DistillationLoss(target_lambda=args.target_lambda,
                                kl_lambda=args.kl_lambda,
-                               cosine_lambda=args.cosine_lambda,
-                               temperature=args.temperature)
+                               similarity_lambda=args.similarity_lambda,
+                               temperature=args.temperature,
+                               similarity_measure=args.similarity_measure,
+                               full_similarity=args.full_similarity,
+                               center_columns=not args.no_center_columns,
+                               svd_grad=not args.no_svd_grad,
+                               dim_matching=args.dim_matching)
 
     trainer = DistilTrainer(
-        teacher_model=teacher_model,
         student_model=student_model,
+        teacher_model=teacher_model,
         loss_fn=loss_fn,
         args=training_args,
         train_dataset=tokenized_dataset_256["train"],
