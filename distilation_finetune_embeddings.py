@@ -22,7 +22,7 @@ if __name__ == '__main__':
     parser.add_argument('--teacher_model', default='allegro/herbert-large-cased')
     parser.add_argument('--dataset_name', default='distillation_corpus')
     parser.add_argument('--num_proc', default=16, type=int)
-    parser.add_argument('--output_dir', default='distil_herbert_out')
+    parser.add_argument('--output_dir', default='distil_herbert_out_512')
     parser.add_argument('--learning_rate', default=5e-5, type=float)
     parser.add_argument('--warmup_ratio', default=0.06, type=float)
     parser.add_argument('--fine_tuning_steps', default=10000, type=int)
@@ -35,6 +35,11 @@ if __name__ == '__main__':
     parser.add_argument('--target_lambda', default=0.5, type=float)
     parser.add_argument('--kl_lambda', default=0.5, type=float)
     parser.add_argument('--similarity_lambda', default=0., type=float)
+    parser.add_argument('--similarity_measure', default=None, choices=['none', 'cosine', 'linear'])
+    parser.add_argument('--no_center_columns', action='store_true')
+    parser.add_argument('--full_similarity', action='store_true')
+    parser.add_argument('--no_svd_grad', action='store_true')
+    parser.add_argument('--dim_matching', default='zero_pad', choices=['zero_pad', 'none'])
     parser.add_argument('--temperature', default=2., type=float)
     args = parser.parse_args()
 
@@ -75,11 +80,16 @@ if __name__ == '__main__':
     loss_fn = DistillationLoss(target_lambda=args.target_lambda,
                                kl_lambda=args.kl_lambda,
                                similarity_lambda=args.similarity_lambda,
-                               temperature=args.temperature)
+                               temperature=args.temperature,
+                               similarity_measure=args.similarity_measure,
+                               full_similarity=args.full_similarity,
+                               center_columns=not args.no_center_columns,
+                               svd_grad=not args.no_svd_grad,
+                               dim_matching=args.dim_matching)
 
     trainer = DistilTrainer(
-        teacher_model=teacher_model,
         student_model=student_model,
+        teacher_model=teacher_model,
         loss_fn=loss_fn,
         args=training_args,
         train_dataset=tokenized_dataset_512["train"],
